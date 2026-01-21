@@ -77,6 +77,29 @@ pub fn run_greentic_pack_update(bin: &Path, workspace: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn run_greentic_pack_components(bin: &Path, workspace: &Path) -> Result<()> {
+    let status = Command::new(bin)
+        .arg("components")
+        .arg("--in")
+        .arg(workspace)
+        .status()
+        .with_context(|| {
+            format!(
+                "failed to run greentic-pack components for {}",
+                workspace.display()
+            )
+        })?;
+
+    if !status.success() {
+        bail!(
+            "greentic-pack components failed for {}",
+            workspace.display()
+        );
+    }
+
+    Ok(())
+}
+
 pub fn run_greentic_pack_resolve(bin: &Path, workspace: &Path) -> Result<()> {
     let status = Command::new(bin)
         .arg("resolve")

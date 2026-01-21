@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,9 +13,14 @@ use crate::graph::build_flow_graph;
 use crate::ir::{FlowSummary, Manifest, Warning, WarningKind};
 use crate::scan::{ScanConfig, scan_cards};
 use crate::tools::{
-    resolve_greentic_pack_bin, run_greentic_pack_build, run_greentic_pack_doctor,
-    run_greentic_pack_new, run_greentic_pack_resolve, run_greentic_pack_update,
+    resolve_greentic_pack_bin, run_greentic_pack_build, run_greentic_pack_components,
+    run_greentic_pack_doctor, run_greentic_pack_new, run_greentic_pack_resolve,
+    run_greentic_pack_update,
 };
+
+const COMPONENT_REF: &str = "oci://ghcr.io/greentic-ai/components/component-adaptive-card:latest";
+const COMPONENT_MANIFEST_ENV: &str = "GREENTIC_COMPONENT_ADAPTIVE_CARD_MANIFEST";
+const COMPONENT_WASM_ENV: &str = "GREENTIC_COMPONENT_ADAPTIVE_CARD_WASM";
 
 pub fn generate(args: &GenerateArgs) -> Result<()> {
     if !args.cards.is_dir() {
@@ -84,6 +90,7 @@ pub fn generate(args: &GenerateArgs) -> Result<()> {
         readme_entries.push((flow.flow_name.clone(), entry));
     }
 
+    sync_local_component_if_configured(&args.out, &greentic_pack_bin, &mut manifest, args.strict)?;
     run_greentic_pack_update(&greentic_pack_bin, &args.out)?;
     update_readme(&args.out, &args.name, &readme_entries)?;
 
@@ -184,6 +191,113 @@ fn copy_cards(cards_dir: &Path, dest_root: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn sync_local_component_if_configured(
+    pack_root: &Path,
+    greentic_pack_bin: &Path,
+    manifest: &mut Manifest,
+    strict: bool,
+) -> Result<()> {
+    let manifest_path = match env::var(COMPONENT_MANIFEST_ENV) {
+        Ok(value) if !value.trim().is_empty() => Some(PathBuf::from(value)),
+        _ => None,
+    };
+    let wasm_path = match env::var(COMPONENT_WASM_ENV) {
+        Ok(value) if !value.trim().is_empty() => Some(PathBuf::from(value)),
+        _ => None,
+    };
+
+    if manifest_path.is_none() && wasm_path.is_none() {
+        return Ok(());
+    }
+
+    let manifest_path = match manifest_path {
+        Some(path) => path,
+        None => {
+            let message = format!(
+                "{} is set but {} is not",
+                COMPONENT_WASM_ENV, COMPONENT_MANIFEST_ENV
+            );
+            if strict {
+                return Err(anyhow!(message));
+            }
+            manifest
+                .warnings
+                .push(warning(WarningKind::PackOutput, message));
+            return Ok(());
+        }
+    };
+    let wasm_path = match wasm_path {
+        Some(path) => path,
+        None => {
+            let message = format!(
+                "{} is set but {} is not",
+                COMPONENT_MANIFEST_ENV, COMPONENT_WASM_ENV
+            );
+            if strict {
+                return Err(anyhow!(message));
+            }
+            manifest
+                .warnings
+                .push(warning(WarningKind::PackOutput, message));
+            return Ok(());
+        }
+    };
+
+    let pack_version = pack_yaml_version(pack_root);
+    let manifest_contents = fs::read_to_string(&manifest_path).with_context(|| {
+        format!(
+            "failed to read component manifest {}",
+            manifest_path.display()
+        )
+    })?;
+    let mut manifest_json: serde_json::Value = serde_json::from_str(&manifest_contents)
+        .with_context(|| format!("invalid component manifest {}", manifest_path.display()))?;
+    if let Some(version) = pack_version
+        && manifest_json
+            .get("version")
+            .and_then(|value| value.as_str())
+            != Some(version.as_str())
+    {
+        manifest_json["version"] = serde_json::Value::String(version);
+    }
+    let wasm_name = manifest_json
+        .pointer("/artifacts/component_wasm")
+        .and_then(|value| value.as_str())
+        .unwrap_or_else(|| {
+            wasm_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("component_adaptive_card.wasm")
+        });
+
+    let components_dir = pack_root.join("components").join("component-adaptive-card");
+    fs::create_dir_all(&components_dir)
+        .with_context(|| format!("failed to create {}", components_dir.display()))?;
+    fs::write(
+        components_dir.join("component.manifest.json"),
+        serde_json::to_string_pretty(&manifest_json)?,
+    )
+    .with_context(|| {
+        format!(
+            "failed to write component manifest to {}",
+            components_dir.display()
+        )
+    })?;
+    fs::copy(&wasm_path, components_dir.join(wasm_name))
+        .with_context(|| format!("failed to copy component wasm from {}", wasm_path.display()))?;
+
+    run_greentic_pack_components(greentic_pack_bin, pack_root)?;
+    Ok(())
+}
+
+fn pack_yaml_version(pack_root: &Path) -> Option<String> {
+    let contents = fs::read_to_string(pack_root.join("pack.yaml")).ok()?;
+    let yaml: serde_yaml_bw::Value = serde_yaml_bw::from_str(&contents).ok()?;
+    yaml.get("version")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
 }
 
 fn ensure_readme(workspace: &Path, name: &str) -> Result<()> {
@@ -310,15 +424,24 @@ fn extract_gtpack_path(build_output: &crate::tools::BuildOutput) -> Option<PathB
 }
 
 fn write_flow_resolve_sidecar(flow_path: &Path, graph: &crate::graph::FlowGraph) -> Result<()> {
+    let component_source = if let Some(local_wasm) = component_wasm_path(flow_path) {
+        serde_json::json!({
+            "kind": "local",
+            "path": format!("file://{local_wasm}")
+        })
+    } else {
+        serde_json::json!({
+            "kind": "oci",
+            "ref": COMPONENT_REF
+        })
+    };
+
     let mut nodes = serde_json::Map::new();
     for node in graph.nodes.keys() {
         nodes.insert(
             node.clone(),
             serde_json::json!({
-                "source": {
-                    "kind": "oci",
-                    "ref": "oci://ghcr.io/greentic-ai/components/component-adaptive-card:latest"
-                }
+                "source": component_source
             }),
         );
     }
@@ -339,6 +462,51 @@ fn write_flow_resolve_sidecar(flow_path: &Path, graph: &crate::graph::FlowGraph)
     }
 
     Ok(())
+}
+
+fn component_wasm_path(flow_path: &Path) -> Option<String> {
+    let value = env::var(COMPONENT_WASM_ENV).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let flow_dir = flow_path.parent()?;
+    let abs = if Path::new(trimmed).is_absolute() {
+        PathBuf::from(trimmed)
+    } else {
+        env::current_dir().ok()?.join(trimmed)
+    };
+    let flow_dir_abs = if flow_dir.is_absolute() {
+        flow_dir.to_path_buf()
+    } else {
+        env::current_dir().ok()?.join(flow_dir)
+    };
+    let rel = relative_path(&flow_dir_abs, &abs).unwrap_or(abs);
+    Some(rel.to_string_lossy().to_string())
+}
+
+fn relative_path(base: &Path, target: &Path) -> Option<PathBuf> {
+    let base_components: Vec<_> = base.components().collect();
+    let target_components: Vec<_> = target.components().collect();
+    let mut common = 0;
+    while common < base_components.len()
+        && common < target_components.len()
+        && base_components[common] == target_components[common]
+    {
+        common += 1;
+    }
+    let mut rel = PathBuf::new();
+    for _ in common..base_components.len() {
+        rel.push("..");
+    }
+    for component in &target_components[common..] {
+        rel.push(component.as_os_str());
+    }
+    if rel.as_os_str().is_empty() {
+        None
+    } else {
+        Some(rel)
+    }
 }
 
 fn ensure_named_gtpack(dist_dir: &Path, name: &str) -> Result<(PathBuf, Option<Warning>)> {

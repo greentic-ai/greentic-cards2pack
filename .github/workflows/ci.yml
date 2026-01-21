@@ -46,7 +46,7 @@ jobs:
           cargo binstall -y greentic-integration-tester --force
       - run: cargo test --workspace --all-features
       - name: Run gtests
-        run: greentic-integration-tester run --gtest tests/gtests/smoke --artifacts-dir artifacts/gtests --errors
+        run: greentic-integration-tester run --gtest tests/gtests/smoke --artifacts-dir artifacts/gtests --workdir .
 
   build_release:
     needs: [fmt, clippy, test]
