@@ -1,0 +1,18 @@
+{
+  "type": "AdaptiveCard",
+  "greentic": {
+    "cardId": "OVERRIDE-ME",
+    "flow": "wrong-flow"
+  },
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Next",
+      "data": {
+        "flow": "hrAssist",
+        "cardId": "HR-CARD-00",
+        "step": "collect"
+      }
+    }
+  ]
+}

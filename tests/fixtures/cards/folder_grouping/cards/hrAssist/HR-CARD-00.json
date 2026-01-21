@@ -1,0 +1,12 @@
+{
+  "type": "AdaptiveCard",
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Continue",
+      "data": {
+        "step": "start"
+      }
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        run: |
+          if ! command -v cargo-binstall >/dev/null 2>&1; then
+            cargo install cargo-binstall --locked
+          fi
+      - name: Install greentic tools
+        run: |
+          cargo binstall -y greentic-flow --force
+          cargo binstall -y greentic-pack --force
+          cargo binstall -y greentic-integration-tester --force
+      - run: cargo test --workspace --all-features
+      - name: Run gtests
+        run: greentic-integration-tester run --gtest tests/gtests/smoke --artifacts-dir artifacts/gtests --errors
+
+  build_release:
+    needs: [fmt, clippy, test]
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runs-on: ubuntu-latest
+            archive: tar.gz
+            exe: ""
+            binary: greentic-cards2pack
+          - target: x86_64-pc-windows-msvc
+            runs-on: windows-latest
+            archive: zip
+            exe: .exe
+            binary: greentic-cards2pack.exe
+          - target: x86_64-apple-darwin
+            runs-on: macos-15-intel
+            archive: tar.gz
+            exe: ""
+            binary: greentic-cards2pack
+            # If macos-15-intel is unavailable, switch runs-on to macos-15-large.
+          - target: aarch64-apple-darwin
+            runs-on: macos-15
+            archive: tar.gz
+            exe: ""
+            binary: greentic-cards2pack
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Determine version
+        shell: bash
+        run: |
+          version=$(python - <<'PY'
+import json, subprocess
+data = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"])
+metadata = json.loads(data)
+version = next(pkg["version"] for pkg in metadata["packages"] if pkg["name"] == "greentic-cards2pack")
+print(version)
+PY
+          )
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        id: version
+
+      - name: Build release binary
+        shell: bash
+        run: cargo build --release --bin greentic-cards2pack --target ${{ matrix.target }}
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          name="greentic-cards2pack-${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          dist="dist"
+          mkdir -p "$dist"
+          bin_path="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            cp "$bin_path" "$dist/${{ matrix.binary }}"
+            (cd "$dist" && 7z a "${name}.zip" "${{ matrix.binary }}")
+            rm -f "$dist/${{ matrix.binary }}"
+          else
+            tar -C "target/${{ matrix.target }}/release" -czf "$dist/${name}.tar.gz" "${{ matrix.binary }}"
+          fi
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$dist/${name}.${{ matrix.archive }}" > "$dist/${name}.${{ matrix.archive }}.sha256"
+          else
+            shasum -a 256 "$dist/${name}.${{ matrix.archive }}" > "$dist/${name}.${{ matrix.archive }}.sha256"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+
+  release_finalize:
+    needs: [build_release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Determine version
+        id: version
+        run: |
+          version=$(python - <<'PY'
+import json, subprocess
+data = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"])
+metadata = json.loads(data)
+version = next(pkg["version"] for pkg in metadata["packages"] if pkg["name"] == "greentic-cards2pack")
+print(version)
+PY
+          )
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          files: dist/**
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to crates.io (skip if exists)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if output=$(cargo publish --token "$CARGO_REGISTRY_TOKEN" 2>&1); then
+            echo "Published to crates.io"
+          else
+            if echo "$output" | grep -qi "already exists"; then
+              echo "Version already exists on crates.io; skipping publish."
+            else
+              echo "$output"
+              exit 1
+            fi
+          fi

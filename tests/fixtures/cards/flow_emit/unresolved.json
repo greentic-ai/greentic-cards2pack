@@ -1,0 +1,13 @@
+{
+  "type": "AdaptiveCard",
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Missing",
+      "data": {
+        "step": "missing-step",
+        "flow": "demo"
+      }
+    }
+  ]
+}

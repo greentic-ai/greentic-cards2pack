@@ -1,0 +1,21 @@
+{
+  "type": "AdaptiveCard",
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "First",
+      "data": {
+        "cardId": "ONE",
+        "flow": "alpha"
+      }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Second",
+      "data": {
+        "cardId": "TWO",
+        "flow": "alpha"
+      }
+    }
+  ]
+}

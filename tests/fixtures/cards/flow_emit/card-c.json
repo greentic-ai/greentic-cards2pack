@@ -1,0 +1,8 @@
+{
+  "type": "AdaptiveCard",
+  "greentic": {
+    "cardId": "CARD-C",
+    "flow": "demo"
+  },
+  "actions": []
+}
