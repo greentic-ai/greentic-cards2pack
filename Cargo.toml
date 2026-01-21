@@ -1,7 +1,13 @@
 [package]
 name = "greentic-cards2pack"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
+description = "Generate Greentic pack workspaces and archives from Adaptive Cards"
+license = "MIT"
+repository = "https://github.com/greentic-ai/greentic-cards2pack"
+homepage = "https://github.com/greentic-ai/greentic-cards2pack"
+documentation = "https://docs.rs/greentic-cards2pack"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1"
