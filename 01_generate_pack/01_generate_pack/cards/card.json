@@ -1,0 +1,13 @@
+{
+  "type": "AdaptiveCard",
+  "actions": [
+    {
+      "type": "Action.Submit",
+      "title": "Next",
+      "data": {
+        "flow": "demo",
+        "step": "step-1"
+      }
+    }
+  ]
+}

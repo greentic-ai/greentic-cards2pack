@@ -145,6 +145,22 @@ jobs:
           version=$(python3 -c "import json, subprocess; data = subprocess.check_output(['cargo', 'metadata', '--no-deps', '--format-version', '1']); metadata = json.loads(data); print(next(pkg['version'] for pkg in metadata['packages'] if pkg['name'] == 'greentic-cards2pack'))")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: Publish to crates.io (skip if exists)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if output=$(cargo publish 2>&1); then
+            echo "Published to crates.io"
+          else
+            if echo "$output" | grep -qi "already exists"; then
+              echo "Version already exists on crates.io; skipping publish."
+            else
+              echo "$output"
+              exit 1
+            fi
+          fi
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -159,19 +175,3 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to crates.io (skip if exists)
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          set -euo pipefail
-          if output=$(cargo publish --token "$CARGO_REGISTRY_TOKEN" 2>&1); then
-            echo "Published to crates.io"
-          else
-            if echo "$output" | grep -qi "already exists"; then
-              echo "Version already exists on crates.io; skipping publish."
-            else
-              echo "$output"
-              exit 1
-            fi
-          fi
