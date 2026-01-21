@@ -88,14 +88,7 @@ jobs:
       - name: Determine version
         shell: bash
         run: |
-          version=$(python - <<'PY'
-import json, subprocess
-data = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"])
-metadata = json.loads(data)
-version = next(pkg["version"] for pkg in metadata["packages"] if pkg["name"] == "greentic-cards2pack")
-print(version)
-PY
-          )
+          version=$(python3 -c "import json, subprocess; data = subprocess.check_output(['cargo', 'metadata', '--no-deps', '--format-version', '1']); metadata = json.loads(data); print(next(pkg['version'] for pkg in metadata['packages'] if pkg['name'] == 'greentic-cards2pack'))")
           echo "version=$version" >> "$GITHUB_OUTPUT"
         id: version
 
@@ -142,14 +135,7 @@ PY
       - name: Determine version
         id: version
         run: |
-          version=$(python - <<'PY'
-import json, subprocess
-data = subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"])
-metadata = json.loads(data)
-version = next(pkg["version"] for pkg in metadata["packages"] if pkg["name"] == "greentic-cards2pack")
-print(version)
-PY
-          )
+          version=$(python3 -c "import json, subprocess; data = subprocess.check_output(['cargo', 'metadata', '--no-deps', '--format-version', '1']); metadata = json.loads(data); print(next(pkg['version'] for pkg in metadata['packages'] if pkg['name'] == 'greentic-cards2pack'))")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
