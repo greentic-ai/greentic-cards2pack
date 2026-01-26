@@ -51,7 +51,11 @@ fn emits_flow_with_routes() {
     let generated = extract_generated_block(&contents);
 
     assert!(generated.contains("id: demo"));
-    assert!(generated.contains("card_path: assets/cards/card-a.json"));
+    assert!(generated.contains("card:"));
+    assert!(generated.contains("input:"));
+    assert!(generated.contains(r#"asset_path\":\"assets/cards/card-a.json"#));
+    assert!(generated.contains("interaction"));
+    assert!(generated.contains("card_instance_id"));
     assert!(generated.contains("step-b"));
     assert!(generated.contains("CARD-C"));
 }

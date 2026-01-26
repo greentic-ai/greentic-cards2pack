@@ -104,35 +104,17 @@ fn generate_flow_with_cli(
             }
         }
 
-        let (payload, answers) = if let Some(card_path) = &node.card_path {
-            (
-                json!({ "card_path": card_path }),
-                json!({
-                    "action_id": "action-1",
-                    "asset_path": card_path,
-                    "card_instance_id": node_id,
-                    "interaction_type": "Submit",
-                    "needs_interaction": !node.routes.is_empty(),
-                    "raw_inputs": {}
-                }),
-            )
+        let card_path_value = if let Some(card_path) = &node.card_path {
+            card_path.clone()
         } else {
             warnings.push(warning(
                 WarningKind::MissingTarget,
                 format!("stub node {} emitted without card_path", node_id),
             ));
-            (
-                json!({ "card_path": "TODO" }),
-                json!({
-                    "action_id": "action-1",
-                    "asset_path": "TODO",
-                    "card_instance_id": node_id,
-                    "interaction_type": "Submit",
-                    "needs_interaction": !node.routes.is_empty(),
-                    "raw_inputs": {}
-                }),
-            )
+            "TODO".to_string()
         };
+        let needs_interaction = !node.routes.is_empty();
+        let answers = build_card_answers(&node_id, &card_path_value, needs_interaction);
 
         let mut args = vec![
             "add-step".to_string(),
@@ -143,27 +125,15 @@ fn generate_flow_with_cli(
             "--component".to_string(),
             COMPONENT_REF.to_string(),
             "--operation".to_string(),
-            "render".to_string(),
-            "--payload".to_string(),
-            payload.to_string(),
+            "card".to_string(),
+            "--mode".to_string(),
+            "config".to_string(),
             "--answers".to_string(),
-            answers.to_string(),
+            answers,
             "--allow-cycles".to_string(),
         ];
 
-        if routes.is_empty() {
-            warnings.push(warning(
-                WarningKind::MissingTarget,
-                format!("no routes for {}; using routing-out", node_id),
-            ));
-            args.push("--routing-out".to_string());
-        } else if routes.len() == 1 {
-            args.push("--routing-next".to_string());
-            args.push(routes[0].clone());
-        } else {
-            args.push("--routing-multi-to".to_string());
-            args.push(routes.join(","));
-        }
+        push_routing_flags(&mut args, &node_id, &routes, &mut warnings);
 
         run_greentic_flow_strings(&args)?;
         created.insert(node_id);
@@ -248,6 +218,56 @@ fn resolve_node_order(graph: &FlowGraph) -> Vec<String> {
     }
 
     ordered
+}
+
+fn build_card_answers(node_id: &str, card_path: &str, needs_interaction: bool) -> String {
+    let card_spec = json!({ "asset_path": card_path });
+    let interaction = json!({
+        "action_id": "action-1",
+        "card_instance_id": node_id,
+        "interaction_type": "Submit",
+        "raw_inputs": {},
+        "enabled": needs_interaction
+    });
+    let empty_json = json!({}).to_string();
+    let answers = json!({
+        "card_source": "asset",
+        "card_spec": card_spec.to_string(),
+        "envelope": empty_json.clone(),
+        "interaction": interaction.to_string(),
+        "mode": "renderAndValidate",
+        "node_id": node_id,
+        "payload": empty_json.clone(),
+        "session": empty_json.clone(),
+        "state": empty_json.clone(),
+        "validation_mode": "warn"
+    });
+    answers.to_string()
+}
+
+fn push_routing_flags(
+    args: &mut Vec<String>,
+    node_id: &str,
+    routes: &[String],
+    warnings: &mut Vec<Warning>,
+) {
+    match routes.len() {
+        0 => {
+            warnings.push(warning(
+                WarningKind::MissingTarget,
+                format!("no routes for {}; using routing-out", node_id),
+            ));
+            args.push("--routing-out".to_string());
+        }
+        1 => {
+            args.push("--routing-next".to_string());
+            args.push(routes[0].clone());
+        }
+        _ => {
+            args.push("--routing-multi-to".to_string());
+            args.push(routes.join(","));
+        }
+    }
 }
 
 fn run_greentic_flow(args: &[&str]) -> Result<()> {
