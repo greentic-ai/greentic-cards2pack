@@ -114,7 +114,7 @@ fn generate_flow_with_cli(
             "TODO".to_string()
         };
         let needs_interaction = !node.routes.is_empty();
-        let answers = build_card_answers(&node_id, &card_path_value, needs_interaction);
+        let payload = build_card_payload(&node_id, &card_path_value, needs_interaction);
 
         let mut args = vec![
             "add-step".to_string(),
@@ -126,10 +126,8 @@ fn generate_flow_with_cli(
             COMPONENT_REF.to_string(),
             "--operation".to_string(),
             "card".to_string(),
-            "--mode".to_string(),
-            "config".to_string(),
-            "--answers".to_string(),
-            answers,
+            "--payload".to_string(),
+            payload,
             "--allow-cycles".to_string(),
         ];
 
@@ -220,7 +218,7 @@ fn resolve_node_order(graph: &FlowGraph) -> Vec<String> {
     ordered
 }
 
-fn build_card_answers(node_id: &str, card_path: &str, needs_interaction: bool) -> String {
+fn build_card_payload(node_id: &str, card_path: &str, needs_interaction: bool) -> String {
     let card_spec = json!({ "asset_path": card_path });
     let interaction = json!({
         "action_id": "action-1",
@@ -229,20 +227,19 @@ fn build_card_answers(node_id: &str, card_path: &str, needs_interaction: bool) -
         "raw_inputs": {},
         "enabled": needs_interaction
     });
-    let empty_json = json!({}).to_string();
-    let answers = json!({
+    let payload = json!({
         "card_source": "asset",
-        "card_spec": card_spec.to_string(),
-        "envelope": empty_json.clone(),
-        "interaction": interaction.to_string(),
+        "card_spec": card_spec,
+        "envelope": json!({}),
+        "interaction": interaction,
         "mode": "renderAndValidate",
         "node_id": node_id,
-        "payload": empty_json.clone(),
-        "session": empty_json.clone(),
-        "state": empty_json.clone(),
+        "payload": json!({}),
+        "session": json!({}),
+        "state": json!({}),
         "validation_mode": "warn"
     });
-    answers.to_string()
+    payload.to_string()
 }
 
 fn push_routing_flags(

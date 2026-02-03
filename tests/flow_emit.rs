@@ -52,8 +52,8 @@ fn emits_flow_with_routes() {
 
     assert!(generated.contains("id: demo"));
     assert!(generated.contains("card:"));
-    assert!(generated.contains("input:"));
-    assert!(generated.contains(r#"asset_path\":\"assets/cards/card-a.json"#));
+    assert!(generated.contains("card_source: asset"));
+    assert!(generated.contains("asset_path: assets/cards/card-a.json"));
     assert!(generated.contains("interaction"));
     assert!(generated.contains("card_instance_id"));
     assert!(generated.contains("step-b"));
