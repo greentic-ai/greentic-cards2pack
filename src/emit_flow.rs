@@ -219,27 +219,34 @@ fn resolve_node_order(graph: &FlowGraph) -> Vec<String> {
 }
 
 fn build_card_payload(node_id: &str, card_path: &str, needs_interaction: bool) -> String {
-    let card_spec = json!({ "asset_path": card_path });
-    let interaction = json!({
-        "action_id": "action-1",
-        "card_instance_id": node_id,
-        "interaction_type": "Submit",
-        "raw_inputs": {},
-        "enabled": needs_interaction
-    });
-    let payload = json!({
-        "card_source": "asset",
-        "card_spec": card_spec,
-        "envelope": json!({}),
-        "interaction": interaction,
-        "mode": "renderAndValidate",
-        "node_id": node_id,
-        "payload": json!({}),
-        "session": json!({}),
-        "state": json!({}),
-        "validation_mode": "warn"
-    });
-    payload.to_string()
+    let mut input = serde_json::Map::new();
+    input.insert("card_source".to_string(), json!("asset"));
+    input.insert("card_spec".to_string(), json!({ "asset_path": card_path }));
+    input.insert("mode".to_string(), json!("renderAndValidate"));
+    input.insert("node_id".to_string(), json!(node_id));
+    input.insert("payload".to_string(), json!({}));
+    input.insert("session".to_string(), json!({}));
+    input.insert("state".to_string(), json!({}));
+    input.insert("validation_mode".to_string(), json!("warn"));
+    if needs_interaction {
+        input.insert(
+            "interaction".to_string(),
+            json!({
+                "action_id": "action-1",
+                "card_instance_id": node_id,
+                "interaction_type": "Submit",
+                "raw_inputs": {}
+            }),
+        );
+    }
+    let call_payload = serde_json::Value::Object(input.clone());
+    let mut call = serde_json::Map::new();
+    call.insert("op".to_string(), json!("render"));
+    call.insert("payload".to_string(), call_payload);
+    call.insert("metadata".to_string(), json!([]));
+
+    input.insert("call".to_string(), serde_json::Value::Object(call));
+    serde_json::Value::Object(input).to_string()
 }
 
 fn push_routing_flags(

@@ -11,20 +11,34 @@ use crate::diagnostics::{build_diagnostics, summarize, warning};
 use crate::emit_flow::emit_flow;
 use crate::graph::build_flow_graph;
 use crate::ir::{FlowSummary, Manifest, Warning, WarningKind};
+use crate::qa_integration::{
+    PromptLimits, Source, build_prompt2flow_config, persist_prompt2flow_config,
+    prompt_limits_from_arg,
+};
 use crate::scan::{ScanConfig, scan_cards};
 use crate::tools::{
     resolve_greentic_pack_bin, run_greentic_pack_build, run_greentic_pack_components,
     run_greentic_pack_doctor, run_greentic_pack_new, run_greentic_pack_resolve,
     run_greentic_pack_update,
 };
+use serde_yaml_bw::{self, Value as YamlValue};
 
 const COMPONENT_REF: &str = "oci://ghcr.io/greentic-ai/components/component-adaptive-card:latest";
 const COMPONENT_MANIFEST_ENV: &str = "GREENTIC_COMPONENT_ADAPTIVE_CARD_MANIFEST";
 const COMPONENT_WASM_ENV: &str = "GREENTIC_COMPONENT_ADAPTIVE_CARD_WASM";
+const PROMPT_COMPONENT_REF: &str =
+    "oci://ghcr.io/greentic-ai/components/component-prompt2flow:latest";
 
 pub fn generate(args: &GenerateArgs) -> Result<()> {
     if !args.cards.is_dir() {
         bail!("cards directory does not exist: {}", args.cards.display());
+    }
+
+    if args.prompt_json.is_some() && !args.prompt {
+        bail!("--prompt-json requires --prompt");
+    }
+    if args.prompt_limits.is_some() && !args.prompt {
+        bail!("--prompt-limits requires --prompt");
     }
 
     let greentic_pack_bin = resolve_greentic_pack_bin(args.greentic_pack_bin.as_deref())?;
@@ -32,6 +46,7 @@ pub fn generate(args: &GenerateArgs) -> Result<()> {
     if !pack_yaml.exists() {
         run_greentic_pack_new(&greentic_pack_bin, &args.out, &args.name)?;
     }
+    let default_flow_path = default_flow_file(&pack_yaml)?;
 
     fs::create_dir_all(&args.out)
         .with_context(|| format!("failed to create workspace {}", args.out.display()))?;
@@ -53,6 +68,27 @@ pub fn generate(args: &GenerateArgs) -> Result<()> {
     copy_cards(&args.cards, &assets_cards)?;
     ensure_readme(&args.out, &args.name)?;
 
+    let prompt_limits = if args.prompt {
+        prompt_limits_from_arg(args.prompt_limits.as_deref())?.unwrap_or_default()
+    } else {
+        PromptLimits::default()
+    };
+
+    if args.prompt {
+        let source = args
+            .prompt_json
+            .as_deref()
+            .map(Source::JsonFile)
+            .unwrap_or(Source::Interactive);
+        let config = build_prompt2flow_config(source, prompt_limits)?;
+        let prompt_config_path = args
+            .out
+            .join("assets")
+            .join("config")
+            .join("prompt2flow.json");
+        persist_prompt2flow_config(&config, &prompt_config_path)?;
+    }
+
     let scan_config = ScanConfig {
         cards_dir: assets_cards.clone(),
         group_by: args.group_by,
@@ -72,7 +108,18 @@ pub fn generate(args: &GenerateArgs) -> Result<()> {
         if !flow_warnings.is_empty() {
             manifest.warnings.extend(flow_warnings);
         }
+        let is_prompt_flow = args.prompt
+            && default_flow_path
+                .as_ref()
+                .map(|default| default == &path)
+                .unwrap_or(false);
+        if is_prompt_flow {
+            insert_prompt_node(&path)?;
+        }
         write_flow_resolve_sidecar(&path, &graph)?;
+        if is_prompt_flow {
+            extend_sidecar_with_prompt(&path)?;
+        }
         let flow_path = path
             .strip_prefix(&args.out)
             .unwrap_or(&path)
@@ -190,6 +237,145 @@ fn copy_cards(cards_dir: &Path, dest_root: &Path) -> Result<()> {
         fs::copy(path, &dest_path).with_context(|| format!("failed to copy {}", path.display()))?;
     }
 
+    Ok(())
+}
+
+fn default_flow_file(pack_yaml: &Path) -> Result<Option<PathBuf>> {
+    let contents =
+        fs::read_to_string(pack_yaml).with_context(|| format!("read {}", pack_yaml.display()))?;
+    let manifest: YamlValue =
+        serde_yaml_bw::from_str(&contents).context("parse pack manifest yaml for default flow")?;
+    let flows = manifest
+        .get("flows")
+        .and_then(YamlValue::as_sequence)
+        .cloned()
+        .unwrap_or_default();
+    let root = pack_yaml.parent().unwrap_or_else(|| Path::new("."));
+    for candidate in &flows {
+        if let Some(entrypoints) = candidate
+            .get("entrypoints")
+            .and_then(YamlValue::as_sequence)
+            && entrypoints
+                .iter()
+                .any(|entry| entry.as_str() == Some("default"))
+            && let Some(file) = candidate.get("file").and_then(YamlValue::as_str)
+        {
+            return Ok(Some(root.join(file)));
+        }
+    }
+    if let Some(first) = flows.first()
+        && let Some(file) = first.get("file").and_then(YamlValue::as_str)
+    {
+        return Ok(Some(root.join(file)));
+    }
+    Ok(None)
+}
+
+fn insert_prompt_node(flow_path: &Path) -> Result<()> {
+    let contents =
+        fs::read_to_string(flow_path).with_context(|| format!("read {}", flow_path.display()))?;
+    let nodes = extract_node_order(&contents, flow_path)?;
+
+    if nodes
+        .first()
+        .map(|name| name == "prompt2flow")
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    if let Some(index) = nodes.iter().position(|name| name == "prompt2flow") {
+        let node_name = &nodes[index];
+        bail!(
+            "prompt2flow node '{}' exists in {} but is not the first node (index={}): move it to the start or regenerate with --prompt",
+            node_name,
+            flow_path.display(),
+            index
+        );
+    }
+
+    let first_node_name = nodes.first().expect("nodes should be present");
+    let marker = "nodes:\n";
+    let insert_pos = contents
+        .find(marker)
+        .map(|idx| idx + marker.len())
+        .ok_or_else(|| anyhow!("flow {} missing nodes section", flow_path.display()))?;
+    let snippet = format!(
+        "  prompt2flow:\n    routing:\n    - to: {first}\n    component.exec:\n      component: ai.greentic.component-prompt2flow\n      operation: handle_message\n      input:\n        config_path: assets/config/prompt2flow.json\n\n",
+        first = first_node_name
+    );
+    let new_contents = format!(
+        "{}{}{}",
+        &contents[..insert_pos],
+        snippet,
+        &contents[insert_pos..]
+    );
+    fs::write(flow_path, new_contents)
+        .with_context(|| format!("write modified flow {}", flow_path.display()))?;
+    Ok(())
+}
+
+fn extract_node_order(contents: &str, flow_path: &Path) -> Result<Vec<String>> {
+    let marker = "nodes:\n";
+    let start = contents
+        .find(marker)
+        .map(|idx| idx + marker.len())
+        .ok_or_else(|| anyhow!("flow {} missing nodes section", flow_path.display()))?;
+    let mut nodes = Vec::new();
+    for line in contents[start..].lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        if indent < 2 {
+            break;
+        }
+        if indent != 2 {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.starts_with('-') {
+            continue;
+        }
+        if let Some(name) = trimmed.strip_suffix(':') {
+            nodes.push(name.to_string());
+            continue;
+        }
+        break;
+    }
+    if nodes.is_empty() {
+        bail!("flow {} has no nodes", flow_path.display());
+    }
+    Ok(nodes)
+}
+
+fn extend_sidecar_with_prompt(flow_path: &Path) -> Result<()> {
+    let sidecar_path = flow_path.with_extension("ygtc.resolve.json");
+    let mut payload: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&sidecar_path)
+            .with_context(|| format!("read {}", sidecar_path.display()))?,
+    )
+    .context("parse flow resolve sidecar")?;
+    let nodes = payload
+        .get_mut("nodes")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| anyhow!("missing nodes map in {}", sidecar_path.display()))?;
+    if nodes.contains_key("prompt2flow") {
+        return Ok(());
+    }
+    nodes.insert(
+        "prompt2flow".to_string(),
+        serde_json::json!({
+            "source": {
+                "kind": "oci",
+                "ref": PROMPT_COMPONENT_REF
+            }
+        }),
+    );
+    fs::write(
+        &sidecar_path,
+        serde_json::to_string_pretty(&payload).context("serialize updated sidecar")?,
+    )
+    .with_context(|| format!("write {}", sidecar_path.display()))?;
     Ok(())
 }
 
@@ -553,4 +739,81 @@ fn ensure_named_gtpack(dist_dir: &Path, name: &str) -> Result<(PathBuf, Option<W
     }
 
     Ok((target_path, Some(normalized_warning)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    const BASE_FLOW: &str = "\
+nodes:
+  start:
+    component.exec:
+      component: dummy
+  follow:
+    component.exec:
+      component: dummy
+";
+
+    fn write_flow(contents: &str) -> (TempDir, PathBuf) {
+        let tmp = TempDir::new().expect("temp dir");
+        let flow = tmp.path().join("flow.ygtc");
+        fs::write(&flow, contents).expect("write flow");
+        (tmp, flow)
+    }
+
+    #[test]
+    fn prompt_node_inserts_before_first_node() {
+        let (_tmp, flow_path) = write_flow(BASE_FLOW);
+        insert_prompt_node(&flow_path).expect("insert prompt node");
+        let updated = fs::read_to_string(&flow_path).expect("read updated flow");
+        let prompt_index = updated.find("prompt2flow:").expect("has prompt node");
+        let start_index = updated.find("start:").expect("has start node");
+        assert!(prompt_index < start_index);
+        assert_eq!(
+            updated.matches("prompt2flow:").count(),
+            1,
+            "should not duplicate prompt node"
+        );
+    }
+
+    #[test]
+    fn prompt_node_is_idempotent() {
+        let flow_contents = "\
+nodes:
+  prompt2flow:
+    routing:
+    - to: start
+  start:
+    component.exec:
+      component: dummy
+";
+        let (_tmp, flow_path) = write_flow(flow_contents);
+        insert_prompt_node(&flow_path).expect("insert prompt node should no-op");
+        let updated = fs::read_to_string(&flow_path).expect("read updated flow");
+        assert_eq!(updated.matches("prompt2flow:").count(), 1);
+        assert!(updated.find("prompt2flow:").unwrap() < updated.find("start:").unwrap());
+    }
+
+    #[test]
+    fn prompt_node_error_when_not_first() {
+        let flow_contents = "\
+nodes:
+  start:
+    component.exec:
+      component: dummy
+  prompt2flow:
+    routing:
+    - to: start
+";
+        let (_tmp, flow_path) = write_flow(flow_contents);
+        let err =
+            insert_prompt_node(&flow_path).expect_err("should fail when prompt node not first");
+        let message = err.to_string();
+        assert!(message.contains("prompt2flow node 'prompt2flow' exists"));
+        assert!(message.contains("index=1"));
+        assert!(message.contains(flow_path.to_str().unwrap()));
+    }
 }

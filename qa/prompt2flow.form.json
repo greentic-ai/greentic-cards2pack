@@ -1,0 +1,71 @@
+{
+  "id": "prompt2flow",
+  "title": "Prompt-to-flow router",
+  "version": "1.0.0",
+  "description": "Collecting the configuration for the component-prompt2flow router.",
+  "progress_policy": {
+    "skip_answered": true,
+    "autofill_defaults": false,
+    "treat_default_as_answered": false
+  },
+  "questions": [
+    {
+      "id": "mode.require_prefix",
+      "type": "boolean",
+      "title": "Require routing prefixes?",
+      "description": "When true, queries must start with one of the prefixes before scoring.",
+      "required": true,
+      "default": true
+    },
+    {
+      "id": "mode.prefixes",
+      "title": "Routing prefixes",
+      "type": "string",
+      "description": "Enter a JSON array of prefixes (example: [\"go:\", \"/\"]).",
+      "required": true,
+      "default": "[\"go:\", \"/\"]"
+    },
+    {
+      "id": "mode.min_score",
+      "type": "number",
+      "title": "Minimum score",
+      "description": "Guards when the top intent should route automatically.",
+      "required": true,
+      "default": 0.35
+    },
+    {
+      "id": "mode.min_gap",
+      "type": "number",
+      "title": "Minimum score gap",
+      "description": "Absolute difference between the best and second-best intent.",
+      "required": true,
+      "default": 0.10
+    },
+    {
+      "id": "mode.top_k",
+      "type": "integer",
+      "title": "Top-K intents",
+      "description": "Maximum number of intents shown in the options card.",
+      "required": true,
+      "default": 3
+    },
+    {
+      "id": "intents",
+      "type": "list",
+      "title": "Intent definitions",
+      "description": "Provide a JSON array of intent objects. Each object must include id/title/flow and may include node/examples/keywords/anchors. Keep within the configured prompts limits.",
+      "required": true,
+      "list": {
+        "fields": [
+          { "id": "id", "title": "Intent identifier" },
+          { "id": "title", "title": "Intent title" },
+          { "id": "flow", "title": "Flow to route to" },
+          { "id": "node", "title": "Optional node id" },
+          { "id": "examples", "title": "Examples (JSON array)" },
+          { "id": "keywords", "title": "Keywords (JSON array)" },
+          { "id": "anchors", "title": "Anchors (JSON array)" }
+        ]
+      }
+    }
+  ]
+}

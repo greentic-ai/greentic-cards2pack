@@ -42,6 +42,15 @@ pub struct GenerateArgs {
     /// Print greentic-pack command and output.
     #[arg(long)]
     pub verbose: bool,
+    /// Prompt-based routing (requires prompt2flow component).
+    #[arg(long)]
+    pub prompt: bool,
+    /// Answers JSON produced by greentic-qa (requires --prompt).
+    #[arg(long = "prompt-json")]
+    pub prompt_json: Option<PathBuf>,
+    /// Override prompt limits via JSON string or file (requires --prompt).
+    #[arg(long = "prompt-limits")]
+    pub prompt_limits: Option<String>,
 }
 
 #[derive(ValueEnum, Copy, Clone, Debug, Eq, PartialEq, Serialize)]

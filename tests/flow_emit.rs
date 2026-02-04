@@ -58,6 +58,10 @@ fn emits_flow_with_routes() {
     assert!(generated.contains("card_instance_id"));
     assert!(generated.contains("step-b"));
     assert!(generated.contains("CARD-C"));
+    assert!(generated.contains("call:"));
+    assert!(generated.contains("op: render"));
+    assert!(generated.contains("metadata: []"));
+    assert!(!generated.contains("envelope: {}"));
 }
 
 #[test]

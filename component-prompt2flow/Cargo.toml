@@ -1,0 +1,22 @@
+[package]
+name = "component-prompt2flow"
+rust-version.workspace =true
+edition.workspace=true
+license = "MIT"
+description = "Prompt-to-flow routing component"
+repository = "https://github.com/greentic-ai/greentic-cards2pack"
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen.workspace=true
+serde = { workspace=true, features = ["derive"] }
+serde_json.workspace=true
+greentic-types.workspace=true
+anyhow.workspace=true
+
+[dev-dependencies]
+serde_json.workspace=true
+tempfile.workspace=true

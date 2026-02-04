@@ -1,0 +1,9 @@
+{
+  "type": "AdaptiveCard",
+  "greentic": {
+    "cardId": "prompt-card",
+    "flow": "main"
+  },
+  "body": [],
+  "actions": []
+}

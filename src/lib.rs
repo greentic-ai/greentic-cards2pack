@@ -3,6 +3,7 @@ pub mod diagnostics;
 pub mod emit_flow;
 pub mod graph;
 pub mod ir;
+pub mod qa_integration;
 pub mod scan;
 pub mod tools;
 pub mod workspace;

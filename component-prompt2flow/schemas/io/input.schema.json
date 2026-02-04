@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Prompt2FlowInput",
+  "type": "object",
+  "required": ["config_path", "message"],
+  "properties": {
+    "config_path": { "type": "string" },
+    "message": { "type": "object" },
+    "action": { "type": ["object", "null"], "default": null }
+  },
+  "additionalProperties": false
+}

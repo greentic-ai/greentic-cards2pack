@@ -1,0 +1,6 @@
+package ai-greentic:component-prompt2flow;
+
+world component {
+    export describe: func() -> string;
+    export handle: func(input: string) -> string;
+}

@@ -39,6 +39,7 @@ if "%CMD%"=="new" (
   :donew
   if "%OUT%"=="" exit /b 1
   if not exist "%OUT%" mkdir "%OUT%"
+  echo name: demo> "%OUT%\pack.yaml"
   exit /b 0
 )
 
@@ -117,6 +118,7 @@ case "$cmd" in
     done
     [[ -n "$out" ]] || { echo "missing --dir" >&2; exit 1; }
     mkdir -p "$out"
+    printf "name: demo\n" > "$out/pack.yaml"
     ;;
   update)
     out=""

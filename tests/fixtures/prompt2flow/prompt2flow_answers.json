@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "mode": {
+    "require_prefix": true,
+    "prefixes": ["go:", "/"],
+    "min_score": 0.35,
+    "min_gap": 0.1,
+    "top_k": 3
+  },
+  "intents": [
+    {
+      "id": "webex_setup",
+      "title": "Set up Webex",
+      "route": { "flow": "setup_flow", "node": "start" },
+      "examples": ["go: configure webex", "configure webex"],
+      "keywords": ["webex", "setup"],
+      "anchors": ["webex", "configure"]
+    },
+    {
+      "id": "webex_send",
+      "title": "Send a Webex message",
+      "route": { "flow": "send_flow", "node": "start" },
+      "examples": ["go: send webex", "send webex"],
+      "keywords": ["webex", "send"],
+      "anchors": ["webex", "send"]
+    }
+  ]
+}

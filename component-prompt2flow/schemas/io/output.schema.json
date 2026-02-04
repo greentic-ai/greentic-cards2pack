@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Prompt2FlowOutcome",
+  "type": "object",
+  "required": ["messages", "state_patch"],
+  "properties": {
+    "messages": { "type": "array" },
+    "state_patch": { "type": "object" },
+    "route": {}
+  },
+  "additionalProperties": false
+}
